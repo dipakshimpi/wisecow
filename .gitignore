@@ -1,0 +1,8 @@
+# Python temporary files and logs
+__pycache__/
+*.pyc
+scripts/*.log
+
+# Windows desktop files
+Thumbs.db
+Desktop.ini
