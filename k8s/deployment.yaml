@@ -32,9 +32,9 @@ spec:
           tcpSocket:
             port: 4499
           initialDelaySeconds: 5
-          periodSeconds: 10
+          periodSeconds: 30
         readinessProbe:
           tcpSocket:
             port: 4499
           initialDelaySeconds: 5
-          periodSeconds: 10
+          periodSeconds: 30
