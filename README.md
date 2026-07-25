@@ -137,6 +137,7 @@ The GitHub Actions workflow [`.github/workflows/ci-cd.yaml`](file:///.github/wor
    - Logs into **GitHub Container Registry (GHCR)** using `${{ secrets.GITHUB_TOKEN }}`.
    - Builds and tags the Docker image with `latest` and `sha-<commit_sha>`.
    - Pushes the image to `ghcr.io/<owner>/wisecow`.
+   - ⚠️ **IMPORTANT GHCR GOTCHA**: Packages pushed to GHCR are **Private** by default, even in public repositories! After your first CI run, you must go to **GitHub → Packages → wisecow → Package settings → Change visibility** and set it to **Public**. Otherwise, anyone pulling your `deployment.yaml` will hit an `ImagePullBackOff` permission error.
 
 2. **Deploy Job (`self-hosted`)**:
    - Runs on the local self-hosted runner connected to your Windows machine.
