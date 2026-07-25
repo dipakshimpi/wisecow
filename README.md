@@ -1,6 +1,6 @@
 # Wisecow DevOps Assessment
 
-A complete, end-to-end DevOps implementation for the **Wisecow** application. This project dockerizes Wisecow, deploys it to a local Kubernetes (Kind) cluster with custom port mappings, secures external traffic via **Nginx Ingress** and **cert-manager (TLS)**, automates CI/CD with **GitHub Actions** and **GHCR** using a self-hosted runner, and includes automated system and application health monitoring scripts.
+A complete, end-to-end DevOps implementation for the **Wisecow** application. This project dockerizes Wisecow, deploys it to a local Kubernetes (Kind) cluster with custom port mappings, secures external traffic via **Nginx Ingress** and **cert-manager (TLS)**, automates CI/CD with **GitHub Actions** and **GHCR** using a self-hosted runner, includes automated system and application health monitoring scripts, and enforces zero-trust security via **KubeArmor**.
 
 ---
 
@@ -14,6 +14,7 @@ A complete, end-to-end DevOps implementation for the **Wisecow** application. Th
    - `app_health_checker.py`: HTTP health checker handling Wisecow's single-threaded netcat connection teardown via `Connection: close` headers.
 5. **Secure TLS Communication**: Nginx Ingress Controller + cert-manager with a self-signed `ClusterIssuer` terminating HTTPS traffic on `https://localhost`.
 6. **Continuous Deployment (CD)**: Self-hosted GitHub Actions runner executing `kubectl set image` updates directly on the local Kind cluster.
+7. **Zero-Trust Security (KubeArmor)**: Defined and applied a zero-trust `KubeArmorPolicy` restricting process execution to whitelisted binaries (`nc`, `cowsay`, `fortune`, `bash`, `cat`), blocking sensitive system file access (`/etc/shadow`, `/etc/passwd`), and auditing unauthorized directory access (`/root/`).
 
 ---
 
@@ -28,6 +29,9 @@ wisecow/
 │   ├── deployment.yaml         # Kubernetes Deployment (2 replicas, probes, resources)
 │   ├── service.yaml            # Kubernetes NodePort Service (Port 4499 -> 30099)
 │   └── ingress.yaml            # Nginx Ingress & cert-manager ClusterIssuer (TLS)
+├── kubearmor/
+│   ├── policy.yaml             # KubeArmor zero-trust security policy
+│   └── violation_screenshot.png # Violation evidence screenshot
 ├── scripts/
 │   ├── health_monitor.py       # System metrics monitor (psutil)
 │   ├── app_health_checker.py   # Application HTTP availability checker
@@ -126,6 +130,34 @@ kubectl get certificate
 # Test HTTPS termination (-k for self-signed certificate)
 curl.exe -k -m 5 https://localhost/
 ```
+
+---
+
+## 🛡️ Zero-Trust Security (KubeArmor)
+
+We implemented a **Zero-Trust KubeArmor Policy** ([`kubearmor/policy.yaml`](file:///kubearmor/policy.yaml)) targeting the Wisecow workload.
+
+### Key Security Controls Enforced:
+* **Process Restrictions**: Only whitelisted binaries (`/bin/bash`, `/bin/sh`, `/usr/bin/nc`, `/usr/games/fortune`, `/usr/games/cowsay`, `/usr/bin/cat`) can execute. Any unauthorized binary (e.g. `nmap`, `curl`, `python3`) is audited/blocked.
+* **File Protection**: Blocks access to sensitive system files (`/etc/shadow`, `/etc/passwd`, `/etc/ssh/ssh_host_rsa_key`).
+* **Directory Auditing**: Audits unauthorized access attempts to `/root/`.
+* **Network Restrictions**: Permits TCP traffic for netcat listener; blocks UDP and RAW sockets.
+
+### Apply Policy & Verify:
+
+```bash
+# Install KubeArmor via Helm
+helm repo add kubearmor https://kubearmor.github.io/charts
+helm upgrade --install kubearmor-operator kubearmor/kubearmor-operator -n kubearmor --create-namespace
+
+# Apply Zero-Trust Policy
+kubectl apply -f kubearmor/policy.yaml
+
+# Verify Active Policy
+kubectl get kubearmorpolicies -n default
+```
+
+*Violation evidence screenshot is stored at [`kubearmor/violation_screenshot.png`](file:///kubearmor/violation_screenshot.png).*
 
 ---
 
