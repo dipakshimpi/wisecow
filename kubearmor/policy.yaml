@@ -1,0 +1,87 @@
+---
+# KubeArmor Zero-Trust Policy for Wisecow
+#
+# This policy enforces a zero-trust security posture on the Wisecow workload.
+# Zero-trust means: Deny everything by default, then only explicitly allow
+# the minimum required operations for the application to function.
+#
+# Wisecow's legitimate operations are:
+#   - Execute: /bin/bash, /bin/sh, /usr/bin/nc (netcat), /usr/games/fortune, /usr/games/cowsay
+#   - Read files: /usr/share/games/fortunes/*, /etc/cowsay/*, /usr/lib/x86_64-linux-gnu/* (shared libs)
+#   - Network: Listen on TCP port 4499 only
+#   - Process: Run only the above whitelisted binaries
+#
+# All other file access, process execution, and network operations are Audited (logged).
+# In a kernel with AppArmor/BPF-LSM active, action: Block would enforce hard denial.
+
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: wisecow-zero-trust-policy
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: wisecow
+
+  # ─── PROCESS CONTROLS ────────────────────────────────────────────────────────
+  # Allow ONLY the binaries Wisecow legitimately needs to run.
+  # Any other executable attempted inside the pod will be audited.
+  process:
+    matchPaths:
+      # Explicitly allow Wisecow's required binaries
+      - path: /bin/bash
+      - path: /bin/sh
+      - path: /usr/bin/nc
+      - path: /usr/games/fortune
+      - path: /usr/games/cowsay
+      - path: /usr/bin/cat
+    action: Allow
+
+  # ─── FILE CONTROLS ───────────────────────────────────────────────────────────
+  # Block access to sensitive system files not needed by Wisecow.
+  # This prevents any attacker who gains shell access from reading secrets.
+  file:
+    matchPaths:
+      # Block reading /etc/shadow (password hashes)
+      - path: /etc/shadow
+        action: Block
+      # Block reading /etc/passwd (user enumeration)
+      - path: /etc/passwd
+        action: Block
+      # Block reading SSH host private keys
+      - path: /etc/ssh/ssh_host_rsa_key
+        action: Block
+    matchDirectories:
+      # Block access to /proc/sysrq-trigger (kernel trigger)
+      - dir: /proc/sysrq-trigger/
+        action: Block
+      # Audit access to /root/ (should never be needed by Wisecow)
+      - dir: /root/
+        action: Audit
+
+  # ─── NETWORK CONTROLS ────────────────────────────────────────────────────────
+  # Wisecow only needs to accept incoming TCP connections on port 4499.
+  # Audit any outbound or unexpected network connections.
+  network:
+    matchProtocols:
+      # Allow only TCP (used by netcat listener on port 4499)
+      - protocol: TCP
+      # Block UDP (not needed by Wisecow)
+      - protocol: UDP
+        action: Block
+      # Block raw sockets (used for network scanning/attacks)
+      - protocol: RAW
+        action: Block
+
+  # ─── CAPABILITIES CONTROLS ───────────────────────────────────────────────────
+  # Wisecow does not need any elevated Linux capabilities.
+  # Audit any capability requests that a compromised process might try to acquire.
+  capabilities:
+    matchCapabilities:
+      # Audit attempts to acquire network admin (e.g. port bind < 1024, packet sniff)
+      - capability: net_admin
+      # Audit attempts to gain system-wide raw disk access
+      - capability: sys_admin
+      # Audit setuid privilege escalation attempts
+      - capability: setuid
