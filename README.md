@@ -10,7 +10,7 @@ The infrastructure includes a local Kubernetes (Kind) cluster, automated CI/CD v
 
 1. **Containerization**: The app is containerized using `ubuntu:22.04`. The Dockerfile installs necessary runtime dependencies (`fortune`, `cowsay`, `netcat`) and handles Windows-to-Linux line ending conversions.
 2. **Kubernetes Architecture**: Deployed with 2 replicas, strict resource limits, and readiness/liveness health probes. External access is routed through a NodePort service.
-3. **CI/CD Pipeline**: GitHub Actions automates the building and pushing of Docker images to GitHub Container Registry (GHCR). A self-hosted runner automatically deploys the latest image directly to the local cluster.
+3. **GitOps CI/CD**: GitHub Actions automates building and pushing Docker images to GHCR, and updates the Kustomize manifests. **ArgoCD** runs inside the cluster to automatically pull and synchronize the changes, enforcing a true GitOps pull-based deployment model.
 4. **Monitoring**: Custom Python scripts track system health (CPU, Memory, Disk) and application availability, logging alerts when thresholds are breached.
 5. **TLS Encryption**: Ingress-Nginx and cert-manager terminate HTTPS traffic securely using a local ClusterIssuer.
 6. **Zero-Trust Security**: KubeArmor policies restrict what the container is actually allowed to do at the kernel level, mitigating potential compromises.
@@ -24,10 +24,13 @@ wisecow/
 ├── Dockerfile                  # Container build instructions
 ├── wisecow.sh                  # Application source code
 ├── kind-config.yaml            # Kind cluster configuration and port mappings
+├── argocd/
+│   └── application.yaml        # ArgoCD Application definition
 ├── k8s/
 │   ├── deployment.yaml         # App deployment, probes, and resource limits
 │   ├── service.yaml            # NodePort service configuration
-│   └── ingress.yaml            # Ingress routing and TLS configuration
+│   ├── ingress.yaml            # Ingress routing and TLS configuration
+│   └── kustomization.yaml      # Kustomize manifest for GitOps image updates
 ├── kubearmor/
 │   ├── policy.yaml             # KubeArmor security policy
 │   └── violation_screenshot.png # Evidence of policy enforcement
@@ -116,9 +119,12 @@ curl.exe -k -m 5 https://localhost/
 
 ---
 
-## 🔄 CI/CD Notes
+## 🔄 GitOps CI/CD with ArgoCD
 
-The GitHub Actions pipeline builds the Docker image and pushes it to GitHub Container Registry (GHCR). 
+The continuous deployment pipeline follows a modern **GitOps** architecture:
+1. **GitHub Actions** builds the Docker image and pushes it to GitHub Container Registry (GHCR).
+2. The pipeline then uses **Kustomize** to update the image tag in `k8s/kustomization.yaml` and automatically commits this change back to the repository.
+3. **ArgoCD**, running natively inside the Kubernetes cluster, detects the new commit and automatically synchronizes the live cluster state to match the repository.
 
 > **Important Note regarding GHCR**: Packages pushed to GHCR are Private by default, even if the repository is public. If you fork this project, you must manually navigate to **Package Settings** in GitHub and change the image visibility to **Public** to avoid `ImagePullBackOff` errors in Kubernetes.
 
