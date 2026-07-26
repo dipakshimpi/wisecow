@@ -7,4 +7,4 @@ resources:
 images:
 - name: ghcr.io/dipakshimpi/wisecow
   newName: ghcr.io/dipakshimpi/wisecow
-  newTag: sha-584c49c455732dd5ec379ef188332aa6b3993c8e
+  newTag: sha-7d5759834229d9dadaaf1422ffacbbf096455021
