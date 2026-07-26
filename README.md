@@ -1,20 +1,19 @@
-# Wisecow DevOps Assessment
+# Wisecow DevOps Deployment
 
-A complete, end-to-end DevOps implementation for the **Wisecow** application. This project dockerizes Wisecow, deploys it to a local Kubernetes (Kind) cluster with custom port mappings, secures external traffic via **Nginx Ingress** and **cert-manager (TLS)**, automates CI/CD with **GitHub Actions** and **GHCR** using a self-hosted runner, includes automated system and application health monitoring scripts, and enforces zero-trust security via **KubeArmor**.
+This repository contains the deployment, containerization, and automation setup for the **Wisecow** application. The goal of this project is to provide a secure, automated, and observable environment for the application to run.
+
+The infrastructure includes a local Kubernetes (Kind) cluster, automated CI/CD via GitHub Actions, TLS-secured ingress, system monitoring scripts, and a strict Zero-Trust security posture enforced by KubeArmor.
 
 ---
 
-## 🌟 Features & Milestones Completed
+## Features & Implementation
 
-1. **Dockerization**: Optimized container build using `ubuntu:22.04` slim runtime, handling CRLF line-ending conversions and installing `fortunes-min` runtime databases.
-2. **Kubernetes Deployment**: 2-replica deployment with strict CPU/Memory resource constraints, `tcpSocket` health probes (liveness & readiness), and NodePort service (`30099` mapped to host `4499`).
-3. **CI Pipeline (GitHub Actions & GHCR)**: Automated Docker image build and push to GitHub Container Registry (GHCR) on `push` to `main`, tagged with `latest` and `sha-<commit_sha>`.
-4. **Python Monitoring Utilities**:
-   - `health_monitor.py`: Real-time tracking of CPU, Memory, Disk, and Process count with threshold alerts and rotating file logging.
-   - `app_health_checker.py`: HTTP health checker handling Wisecow's single-threaded netcat connection teardown via `Connection: close` headers.
-5. **Secure TLS Communication**: Nginx Ingress Controller + cert-manager with a self-signed `ClusterIssuer` terminating HTTPS traffic on `https://localhost`.
-6. **Continuous Deployment (CD)**: Self-hosted GitHub Actions runner executing `kubectl set image` updates directly on the local Kind cluster.
-7. **Zero-Trust Security (KubeArmor)**: Defined and applied a zero-trust `KubeArmorPolicy` restricting process execution to whitelisted binaries (`nc`, `cowsay`, `fortune`, `bash`, `cat`), blocking sensitive system file access (`/etc/shadow`, `/etc/passwd`), and auditing unauthorized directory access (`/root/`).
+1. **Containerization**: The app is containerized using `ubuntu:22.04`. The Dockerfile installs necessary runtime dependencies (`fortune`, `cowsay`, `netcat`) and handles Windows-to-Linux line ending conversions.
+2. **Kubernetes Architecture**: Deployed with 2 replicas, strict resource limits, and readiness/liveness health probes. External access is routed through a NodePort service.
+3. **CI/CD Pipeline**: GitHub Actions automates the building and pushing of Docker images to GitHub Container Registry (GHCR). A self-hosted runner automatically deploys the latest image directly to the local cluster.
+4. **Monitoring**: Custom Python scripts track system health (CPU, Memory, Disk) and application availability, logging alerts when thresholds are breached.
+5. **TLS Encryption**: Ingress-Nginx and cert-manager terminate HTTPS traffic securely using a local ClusterIssuer.
+6. **Zero-Trust Security**: KubeArmor policies restrict what the container is actually allowed to do at the kernel level, mitigating potential compromises.
 
 ---
 
@@ -23,184 +22,118 @@ A complete, end-to-end DevOps implementation for the **Wisecow** application. Th
 ```text
 wisecow/
 ├── Dockerfile                  # Container build instructions
-├── wisecow.sh                  # Wisecow Bash web server source
-├── kind-config.yaml            # Kind cluster port mapping (80, 443, 4499)
+├── wisecow.sh                  # Application source code
+├── kind-config.yaml            # Kind cluster configuration and port mappings
 ├── k8s/
-│   ├── deployment.yaml         # Kubernetes Deployment (2 replicas, probes, resources)
-│   ├── service.yaml            # Kubernetes NodePort Service (Port 4499 -> 30099)
-│   └── ingress.yaml            # Nginx Ingress & cert-manager ClusterIssuer (TLS)
+│   ├── deployment.yaml         # App deployment, probes, and resource limits
+│   ├── service.yaml            # NodePort service configuration
+│   └── ingress.yaml            # Ingress routing and TLS configuration
 ├── kubearmor/
-│   ├── policy.yaml             # KubeArmor zero-trust security policy
-│   └── violation_screenshot.png # Violation evidence screenshot
+│   ├── policy.yaml             # KubeArmor security policy
+│   └── violation_screenshot.png # Evidence of policy enforcement
 ├── scripts/
-│   ├── health_monitor.py       # System metrics monitor (psutil)
-│   ├── app_health_checker.py   # Application HTTP availability checker
-│   ├── health_monitor.log      # Log file output (Rotating handler)
-│   └── requirements.txt        # Python dependencies (psutil, requests)
-├── .github/workflows/
-│   └── ci-cd.yaml              # GitHub Actions CI/CD Pipeline
-└── README.md                   # Project documentation
+│   ├── health_monitor.py       # System resource monitoring script
+│   ├── app_health_checker.py   # Application endpoint health checker
+│   └── requirements.txt        # Python dependencies
+└── .github/workflows/
+    └── ci-cd.yaml              # GitHub Actions pipeline
 ```
 
 ---
 
-## 🚀 Quick Start & Local Run
+## 🛡️ Zero-Trust Security with KubeArmor
+
+By default, if an attacker gains access to a container, they can explore the file system, execute arbitrary binaries, and attempt to escalate privileges. 
+
+To prevent this, we implemented a **Zero-Trust KubeArmor Policy** (`kubearmor/policy.yaml`). Instead of trying to guess what a hacker might do, this policy explicitly defines the *only* things the Wisecow application is allowed to do. Everything else is blocked or flagged.
+
+**What the policy actually does:**
+* **Process Execution**: Wisecow only needs a few tools to run (`bash`, `sh`, `nc`, `fortune`, `cowsay`, `cat`). The policy allows these and audits attempts to run anything else (like `curl`, `python`, or `nmap`).
+* **File System Protection**: It explicitly blocks access to sensitive system files that the app never needs to read, such as `/etc/shadow` (password hashes) and `/etc/passwd`.
+* **Network Restrictions**: It allows TCP connections (required for the web server) but explicitly blocks UDP and RAW sockets, preventing attackers from establishing reverse shells or scanning networks.
+* **Capabilities**: It prevents the container processes from acquiring elevated Linux capabilities like `net_admin` or `sys_admin`.
+
+### How to apply and test the policy:
+
+```bash
+# 1. Install KubeArmor via Helm
+helm repo add kubearmor https://kubearmor.github.io/charts
+helm upgrade --install kubearmor-operator kubearmor/kubearmor-operator -n kubearmor --create-namespace
+
+# 2. Apply the security policy
+kubectl apply -f kubearmor/policy.yaml
+
+# 3. Test the policy by attempting an unauthorized action
+kubectl exec deploy/wisecow -- cat /etc/shadow
+```
+*(Note: On local Kind/WSL2 environments, KubeArmor operates in Audit Mode. Unauthorized actions are logged to the KubeArmor telemetry stream rather than hard-blocked.)*
+
+---
+
+## 🚀 Running the Project
 
 ### Prerequisites
-- [Docker Desktop](https://www.docker.com/)
-- [Kind](https://kind.sigs.k8s.io/)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- Docker & Kind
+- kubectl & Helm
 - Python 3.10+
 
-### 1. Run Wisecow in Docker Locally
+### 1. Cluster Setup & Deployment
 
 ```bash
-# Build the Docker image
-docker build -t wisecow:local .
-
-# Run the container
-docker run -d -p 4499:4499 --name wisecow-app wisecow:local
-
-# Verify the app (Returns cowsay ASCII art & fortune quote)
-curl.exe http://localhost:4499/
-
-# Stop container
-docker rm -f wisecow-app
-```
-
----
-
-## ☸️ Kubernetes Deployment (Kind Cluster)
-
-### 1. Create the Kind Cluster
-
-Use the included `kind-config.yaml` to ensure port 4499 (NodePort) and ports 80/443 (Ingress) are mapped to your host:
-
-```bash
+# Create the local cluster with custom port mappings
 kind create cluster --config kind-config.yaml --name wisecow-cluster
-```
 
-### 2. Deploy Application Manifests
-
-```bash
-# Load local Docker image into Kind
+# Build and load the image
+docker build -t wisecow:local .
 kind load docker-image wisecow:local --name wisecow-cluster
 
-# Apply Deployment and Service
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
-
-# Verify Pods and Service
-kubectl get pods
-kubectl get svc
+# Deploy the application
+kubectl apply -f k8s/
 ```
 
-### 3. Verify Direct Access
+### 2. TLS & Ingress Setup
 
 ```bash
-curl.exe -m 5 http://localhost:4499/
-```
-
----
-
-## 🔒 TLS & Ingress Setup (HTTPS)
-
-### 1. Install Nginx Ingress Controller & Cert-Manager
-
-```bash
-# Install Nginx Ingress Controller for Kind
+# Install Ingress-Nginx
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 
 # Install cert-manager
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
-```
 
-### 2. Apply Ingress & ClusterIssuer Manifests
-
-```bash
+# Apply local Ingress configuration
 kubectl apply -f k8s/ingress.yaml
 ```
 
-### 3. Verify HTTPS Access
+### 3. Verify Access
 
 ```bash
-# Check certificate status (READY: True)
-kubectl get certificate
+# Standard HTTP
+curl.exe -m 5 http://localhost:4499/
 
-# Test HTTPS termination (-k for self-signed certificate)
+# Secure HTTPS
 curl.exe -k -m 5 https://localhost/
 ```
 
 ---
 
-## 🛡️ Zero-Trust Security (KubeArmor)
+## 🔄 CI/CD Notes
 
-We implemented a **Zero-Trust KubeArmor Policy** ([`kubearmor/policy.yaml`](file:///kubearmor/policy.yaml)) targeting the Wisecow workload.
+The GitHub Actions pipeline builds the Docker image and pushes it to GitHub Container Registry (GHCR). 
 
-### Key Security Controls Enforced:
-* **Process Restrictions**: Only whitelisted binaries (`/bin/bash`, `/bin/sh`, `/usr/bin/nc`, `/usr/games/fortune`, `/usr/games/cowsay`, `/usr/bin/cat`) can execute. Any unauthorized binary (e.g. `nmap`, `curl`, `python3`) is audited/blocked.
-* **File Protection**: Blocks access to sensitive system files (`/etc/shadow`, `/etc/passwd`, `/etc/ssh/ssh_host_rsa_key`).
-* **Directory Auditing**: Audits unauthorized access attempts to `/root/`.
-* **Network Restrictions**: Permits TCP traffic for netcat listener; blocks UDP and RAW sockets.
-
-### Apply Policy & Verify:
-
-```bash
-# Install KubeArmor via Helm
-helm repo add kubearmor https://kubearmor.github.io/charts
-helm upgrade --install kubearmor-operator kubearmor/kubearmor-operator -n kubearmor --create-namespace
-
-# Apply Zero-Trust Policy
-kubectl apply -f kubearmor/policy.yaml
-
-# Verify Active Policy
-kubectl get kubearmorpolicies -n default
-```
-
-*Violation evidence screenshot is stored at [`kubearmor/violation_screenshot.png`](file:///kubearmor/violation_screenshot.png).*
+> **Important Note regarding GHCR**: Packages pushed to GHCR are Private by default, even if the repository is public. If you fork this project, you must manually navigate to **Package Settings** in GitHub and change the image visibility to **Public** to avoid `ImagePullBackOff` errors in Kubernetes.
 
 ---
 
-## 🔄 CI/CD Pipeline
+## 📊 Monitoring Scripts
 
-The GitHub Actions workflow [`.github/workflows/ci-cd.yaml`](file:///.github/workflows/ci-cd.yaml) consists of two jobs:
+The `scripts/` directory contains tools to observe system and application health.
 
-1. **Build Job (`ubuntu-latest`)**:
-   - Logs into **GitHub Container Registry (GHCR)** using `${{ secrets.GITHUB_TOKEN }}`.
-   - Builds and tags the Docker image with `latest` and `sha-<commit_sha>`.
-   - Pushes the image to `ghcr.io/<owner>/wisecow`.
-   - ⚠️ **IMPORTANT GHCR GOTCHA**: Packages pushed to GHCR are **Private** by default, even in public repositories! After your first CI run, you must go to **GitHub → Packages → wisecow → Package settings → Change visibility** and set it to **Public**. Otherwise, anyone pulling your `deployment.yaml` will hit an `ImagePullBackOff` permission error.
-
-2. **Deploy Job (`self-hosted`)**:
-   - Runs on the local self-hosted runner connected to your Windows machine.
-   - Executes `kubectl set image deployment/wisecow wisecow=ghcr.io/<owner>/wisecow:sha-<commit_sha>`.
-   - Performs a rolling update on the local Kind cluster.
-
----
-
-## 📊 Python Monitoring Scripts
-
-Install dependencies:
 ```bash
 pip install -r scripts/requirements.txt
-```
 
-### 1. System Health Monitoring Script
-Monitors CPU, Memory, Disk, and Process count. Logs alerts to console and `scripts/health_monitor.log`:
-
-```bash
+# Monitor System Resources (CPU, Memory, Disk)
 python scripts/health_monitor.py
-```
 
-### 2. Application Health Checker
-Checks the HTTP availability of the Wisecow service. Uses `Connection: close` headers to cleanly manage netcat socket teardowns:
-
-```bash
+# Check Application Uptime
 python scripts/app_health_checker.py --url http://localhost:4499 --once
 ```
-
----
-
-## 📄 License
-
-This project is open-source under the MIT License.
