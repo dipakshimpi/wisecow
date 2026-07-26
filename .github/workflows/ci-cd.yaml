@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -49,11 +49,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy:
-    runs-on: self-hosted
-    needs: build
-    steps:
-      - name: Deploy to Local Kubernetes (Kind)
+      - name: Update Kubernetes manifests (GitOps)
         run: |
-          kubectl set image deployment/wisecow wisecow=ghcr.io/${{ github.repository_owner }}/wisecow:sha-${{ github.sha }}
-          kubectl rollout status deployment/wisecow
+          cd k8s
+          # Download kustomize
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          # Update the image tag in kustomization.yaml
+          ./kustomize edit set image ghcr.io/${{ github.repository_owner }}/wisecow=ghcr.io/${{ github.repository_owner }}/wisecow:sha-${{ github.sha }}
+          # Commit and push changes
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add kustomization.yaml
+          git commit -m "chore: gitops update image tag to sha-${{ github.sha }}"
+          git push origin main
