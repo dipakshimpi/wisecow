@@ -126,6 +126,8 @@ The continuous deployment pipeline follows a modern **GitOps** architecture:
 2. The pipeline then uses **Kustomize** to update the image tag in `k8s/kustomization.yaml` and automatically commits this change back to the repository.
 3. **ArgoCD**, running natively inside the Kubernetes cluster, detects the new commit and automatically synchronizes the live cluster state to match the repository.
 
+![ArgoCD Dashboard Tree](argocd/argocd_dashboard.png)
+
 > **Important Note regarding GHCR**: Packages pushed to GHCR are Private by default, even if the repository is public. If you fork this project, you must manually navigate to **Package Settings** in GitHub and change the image visibility to **Public** to avoid `ImagePullBackOff` errors in Kubernetes.
 
 ---
